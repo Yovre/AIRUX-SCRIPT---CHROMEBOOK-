@@ -45,8 +45,7 @@ if (window.airuxLoaded) {
     function initAirux() {
         (function() {
             'use strict';
-            // ... O RESTO DO SEU CÓDIGO AQUI (CONFIG, STATE, ETC)
-       
+            
         })();
     }
     

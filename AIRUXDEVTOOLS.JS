@@ -198,7 +198,7 @@ if (window.airuxLoaded) {
                     elements.container.style.display = STATE.isActive ? 'flex' : 'none';
                     elements.container.style.opacity = STATE.isActive ? '1' : '0';
                     elements.container.style.transform = STATE.isActive ? 'translateY(0)' : 'translateY(10px)';
-                    elements.toggleBtn.style.display = STATE.isActive ? 'none' : 'flex';
+                    elements.toggleBtn.style.opacity = STATE.isActive ? '0.7' : '0.1';
                 }
             }
 
@@ -654,35 +654,36 @@ if (window.airuxLoaded) {
                 elements.toggleBtn = document.createElement('button');
                 elements.toggleBtn.id = 'airux-toggle-btn';
                 elements.toggleBtn.innerHTML = `
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${CONFIG.theme.colors.text}" stroke-width="2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${CONFIG.theme.colors.text}" stroke-width="2">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                     </svg>
-                    <span>${CONFIG.name}</span>
                 `;
                 elements.toggleBtn.style.cssText = `
                     position: fixed;
-                    bottom: 20px;
-                    right: 20px;
+                    bottom: 5px;
+                    right: 5px;
                     z-index: 9998;
-                    padding: 10px 16px;
-                    border-radius: 50px;
+                    padding: 4px;
+                    border-radius: 4px;
                     border: none;
                     background: ${CONFIG.theme.colors.primary};
                     color: ${CONFIG.theme.colors.text};
-                    font-weight: bold;
                     cursor: pointer;
-                    box-shadow: ${CONFIG.theme.shadows.button};
+                    box-shadow: none;
                     display: flex;
                     align-items: center;
-                    gap: 8px;
-                    transition: all 0.2s;
+                    justify-content: center;
+                    transition: all 0.3s;
+                    opacity: 0.1;
                     border: 1px solid ${CONFIG.theme.colors.border};
+                    width: 26px;
+                    height: 26px;
                 `;
                 elements.toggleBtn.addEventListener('mouseover', () => {
-                    elements.toggleBtn.style.background = CONFIG.theme.colors.secondary;
+                    elements.toggleBtn.style.opacity = '0.7';
                 });
                 elements.toggleBtn.addEventListener('mouseout', () => {
-                    elements.toggleBtn.style.background = CONFIG.theme.colors.primary;
+                    if (!STATE.isActive) elements.toggleBtn.style.opacity = '0.1';
                 });
                 elements.toggleBtn.addEventListener('click', toggleUI);
                 document.body.appendChild(elements.toggleBtn);
@@ -725,9 +726,92 @@ if (window.airuxLoaded) {
                 document.head.appendChild(style);
             }
 
-            function extractImages() {
+            // Função para capturar screenshot de um elemento
+            function captureElementScreenshot(selector) {
+                return new Promise(resolve => {
+                    if (typeof html2canvas === 'undefined') {
+                        logMessage('WARN', 'html2canvas não carregado. Ignorando captura.');
+                        resolve(null);
+                        return;
+                    }
+                    const element = document.querySelector(selector);
+                    if (!element) {
+                        resolve(null);
+                        return;
+                    }
+                    html2canvas(element, {
+                        logging: false,
+                        useCORS: true,
+                        scale: 2,
+                        onclone: (clonedDoc) => {
+                            // Remove elementos indesejados antes da captura
+                            const toRemove = clonedDoc.querySelectorAll('.ad, .banner, .footer');
+                            toRemove.forEach(el => el.remove());
+                        }
+                    }).then(canvas => {
+                        resolve(canvas.toDataURL('image/png'));
+                    }).catch(() => resolve(null));
+                });
+            }
+
+            // OCR simplificado para imagens
+            async function extractTextFromImage(base64Image) {
+                try {
+                    const response = await fetch('https://api.ocr.space/parse/image', {
+                        method: 'POST',
+                        headers: {
+                            'apikey': 'K89925503688957',
+                            'Content-Type': 'application/x-www-form-urlencoded'
+                        },
+                        body: `base64Image=${encodeURIComponent(base64Image.split(',')[1])}&isOverlayRequired=false`
+                    });
+                    const data = await response.json();
+                    return data.ParsedResults?.[0]?.ParsedText || '';
+                } catch {
+                    return '';
+                }
+            }
+
+            // Descrição automática de imagens
+            async function describeImage(base64Image) {
+                try {
+                    const response = await fetch('https://api.imagga.com/v2/tags', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': 'Basic YWNjXzY1YjRjZDU4YjI0NDdlYTo0YjVjODUyYjI4YjNmYjU4ZjJiM2M0YzRjYzVjM2E0YQ=='
+                        },
+                        body: `image_base64=${encodeURIComponent(base64Image.split(',')[1])}`
+                    });
+                    const data = await response.json();
+                    return data.result?.tags?.map(tag => tag.tag.en).slice(0, 5).join(', ') || '';
+                } catch {
+                    return '';
+                }
+            }
+
+            async function extractImages() {
                 logMessage('DEBUG', "Extraindo imagens relevantes...");
                 const urls = new Set();
+                
+                // Captura de elementos específicos
+                const captureSelectors = [
+                    '.question-content', 
+                    '.enunciado', 
+                    '.question-text',
+                    '#question-container',
+                    '.exercise-content'
+                ];
+                
+                // Capturar screenshots das áreas importantes
+                for (const selector of captureSelectors) {
+                    const screenshot = await captureElementScreenshot(selector);
+                    if (screenshot) {
+                        urls.add(screenshot);
+                        logMessage('INFO', `Capturada área: ${selector}`);
+                    }
+                }
+                
+                // Extração tradicional de imagens
                 document.querySelectorAll('img[src], [style*="background-image"], [data-image]').forEach(el => {
                     let src = null;
                     try {
@@ -745,12 +829,17 @@ if (window.airuxLoaded) {
                         logMessage('WARN', `Erro ao analisar URL: ${src || 'unknown'}. ${e.message}`);
                     }
                 });
-                STATE.images = Array.from(urls).slice(0, 10);
-                logMessage('INFO', `Extração concluída. ${STATE.images.length} imagens relevantes encontradas.`);
+                
+                STATE.images = Array.from(urls).slice(0, 15);
+                logMessage('INFO', `Extração concluída. ${STATE.images.length} elementos visuais encontrados.`);
                 return STATE.images;
             }
 
             async function fetchImageAsBase64(url) {
+                if (url.startsWith('data:image')) {
+                    // Se for uma data URL, retorna apenas a parte base64
+                    return url.split(',')[1];
+                }
                 if (STATE.imageCache[url]) {
                     logMessage('DEBUG', `Usando imagem em cache: ${url.substring(0, 60)}...`);
                     return STATE.imageCache[url];
@@ -987,9 +1076,9 @@ if (window.airuxLoaded) {
                     fetchImageAsBase64(url)
                         .then(base64 => {
                             let mime = 'image/jpeg';
-                            if (/\.png$/i.test(url)) mime = 'image/png';
-                            else if (/\.webp$/i.test(url)) mime = 'image/webp';
-                            else if (/\.gif$/i.test(url)) mime = 'image/gif';
+                            if (url.startsWith('data:image/png')) mime = 'image/png';
+                            else if (url.startsWith('data:image/webp')) mime = 'image/webp';
+                            else if (url.startsWith('data:image/gif')) mime = 'image/gif';
                             imageParts.push({ inlineData: { mimeType: mime, data: base64 } });
                         })
                         .catch(e => logMessage('WARN', `Ignorando imagem devido a erro: ${url.substring(0,60)}... (${e.message})`))
@@ -997,18 +1086,39 @@ if (window.airuxLoaded) {
                 await Promise.allSettled(imageFetchPromises);
                 logMessage('DEBUG', `${imageParts.length} imagens incluídas no prompt.`);
 
-                const promptText = `CONTEXTO: Questão de múltipla escolha (Alternativas A, B, C, D, E).
-OBJETIVO: Identificar a ÚNICA alternativa CORRETA.
+                // Processamento adicional de imagens: OCR e descrição
+                let imageContext = "";
+                for (const img of imageParts) {
+                    try {
+                        // Para cada imagem, extrair texto e gerar descrição
+                        const base64Image = `data:${img.inlineData.mimeType};base64,${img.inlineData.data}`;
+                        const text = await extractTextFromImage(base64Image);
+                        const description = await describeImage(base64Image);
+                        
+                        if (text) imageContext += `\nTEXTO NA IMAGEM: "${text.trim().substring(0, 500)}"`;
+                        if (description) imageContext += `\nDESCRIÇÃO DA IMAGEM: ${description}`;
+                    } catch (e) {
+                        logMessage('WARN', 'Erro no processamento de imagem:', e);
+                    }
+                }
+
+                // NOVO PROMPT MULTIDISCIPLINAR
+                const promptText = `CONTEXTO: Você é um especialista em resolver questões de múltipla escolha (Alternativas A, B, C, D, E) e questões abertas de todos os níveis de ensino (Fundamental, Médio, Superior).
+OBJETIVO: Fornecer a resposta correta de forma precisa.
 INSTRUÇÕES MUITO IMPORTANTES:
 1. ANÁLISE INTERNA: Pense passo a passo para encontrar a resposta (NÃO MOSTRE ESTE RACIOCÍNIO NA SAÍDA). Analise o texto da questão E TODAS as imagens fornecidas.
-2. RESPOSTA FINAL: Retorne APENAS e SOMENTE a LETRA MAIÚSCULA da alternativa correta.
-3. FORMATO ESTRITO: A resposta DEVE ser UMA ÚNICA LETRA: A, B, C, D ou E.
-4. NÃO INCLUA NADA MAIS: Sem texto adicional, sem explicações, sem pontuação (sem ".", ",", etc.), sem markdown, sem numeração, sem frases como "A resposta é:". APENAS A LETRA.
-5. SE INCERTO: Mesmo se não tiver 100% de certeza, escolha a alternativa MAIS PROVÁVEL e retorne apenas a letra correspondente.
+2. RESPOSTA FINAL: 
+   - Para questões de múltipla escolha: Retorne APENAS e SOMENTE a LETRA MAIÚSCULA da alternativa correta.
+   - Para questões abertas: Retorne a resposta de forma direta, clara e concisa.
+3. FORMATO ESTRITO: 
+   - Múltipla escolha: UMA ÚNICA LETRA: A, B, C, D ou E.
+   - Abertas: Texto direto, sem formatação adicional.
+4. NÃO INCLUA NADA MAIS: Sem texto adicional, sem explicações, sem pontuação (em múltipla escolha), sem markdown, sem numeração, sem frases como "A resposta é:". 
+5. SE INCERTO: Mesmo se não tiver 100% de certeza, escolha a alternativa MAIS PROVÁVEL (múltipla escolha) ou a resposta mais adequada (aberta) e retorne-a.
 
 QUESTÃO:
 ${question}
-${imageParts.length > 0 ? '\nIMAGENS (Analise cuidadosamente):\n' : ''}`;
+${imageContext}`;
 
                 const safetySettings = [
                     { category: "HARM_CATEGORY_HARASSMENT", threshold: CONFIG.SAFETY_SETTINGS_THRESHOLD },
@@ -1061,7 +1171,7 @@ ${imageParts.length > 0 ? '\nIMAGENS (Analise cuidadosamente):\n' : ''}`;
                 STATE.retryCount = 0;
 
                 try {
-                    const images = extractImages();
+                    const images = await extractImages();
                     updateImageButtons(images);
 
                     const geminiModels = CONFIG.models.filter(m => m.type === 'gemini');
@@ -1210,13 +1320,14 @@ ${imageParts.length > 0 ? '\nIMAGENS (Analise cuidadosamente):\n' : ''}`;
             async function init() {
                 logMessage('INFO', `----- ${CONFIG.name} v${CONFIG.version} Inicializando -----`);
 
-                try {
+                // Carregar html2canvas se necessário
+                if (typeof html2canvas === 'undefined') {
+                    const canvasScript = document.createElement('script');
+                    canvasScript.src = 'https://html2canvas.hertzen.com/dist/html2canvas.min.js';
+                    canvasScript.onload = initializeUI;
+                    document.head.appendChild(canvasScript);
+                } else {
                     initializeUI();
-                    logMessage('INFO', 'UI inicializada com sucesso');
-                    showNotification(`${CONFIG.name} pronto para uso`, 'success');
-                } catch (error) {
-                    logMessage('ERROR', 'Erro ao inicializar:', error);
-                    showNotification('Erro ao inicializar Airux', 'error');
                 }
             }
 
